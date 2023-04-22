@@ -71,8 +71,11 @@ class Transform:
             return{'rgb': image}
 
 
-def get_expert_labels(data_path, label_path, image_path, dataset, experts):
-    image_full_path = os.path.join(data_path, dataset, image_path)
+def get_expert_labels(data_path, label_path, image_path, dataset, experts, classification=None):
+    if classification:
+        image_full_path = os.path.join(data_path, image_path)
+    else:
+        image_full_path = os.path.join(data_path, dataset, image_path)
     image = Image.open(image_full_path).convert('RGB')
     if experts != 'none':
         labels = {}

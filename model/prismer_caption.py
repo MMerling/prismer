@@ -5,6 +5,7 @@
 # https://github.com/NVlabs/prismer/blob/main/LICENSE
 
 import torch
+
 import numpy as np
 
 from einops.einops import rearrange
@@ -17,21 +18,36 @@ class PrismerCaption(Prismer):
         if train:
             experts_train = self.expert_encoder(experts)
             experts_train = rearrange(experts_train, 'l b d -> b l d')  # batch_size, num_latents, output_dim
-
+            # print(caption)
             caption = self.tokenizer(caption, padding='longest', truncation=True, max_length=30, return_tensors="pt").to(device)
             answer_targets = caption.input_ids.masked_fill(caption.input_ids == self.tokenizer.pad_token_id, -100)
 
             if len(prefix) > 0:
                 prompt_length = len(self.tokenizer(prefix).input_ids) - 1  # remove </s> token
                 answer_targets[:, :prompt_length] = -100
-
+            # print(answer_targets)
+            # print(caption.input_ids.shape)
+            # print(caption.attention_mask.shape)
+            # print(experts_train.shape)
             answer_output = self.text_decoder(caption.input_ids,
                                               attention_mask=caption.attention_mask,
                                               encoder_hidden_states=experts_train,
                                               labels=answer_targets,
                                               return_dict=True)
+            # print(answer_output)
             loss = answer_output.loss.mean()
-            return loss
+            outputs = self.text_decoder.generate(caption.input_ids,
+                                                 attention_mask=caption.attention_mask,
+                                                 encoder_hidden_states=experts_train,
+                                                 return_dict=True)
+
+            output_list_binary = [0 if self.tokenizer.decode(output, skip_special_tokens=True).split(' ')[-1]=="normal" else 1 for output in
+                                 outputs]
+
+            answer_targets_binary = [0 if i.split(' ')[-1]=="normal" else 1 for i in caption]
+
+
+            return loss, output_list_binary, answer_targets_binary
         else:
             if inference == 'generate':
                 prefixs = [prefix] * experts['rgb'].size(0)
@@ -62,22 +78,39 @@ class PrismerCaption(Prismer):
                 experts_train = rearrange(experts_train, 'l b d -> b l d')
 
                 answer = [' ' + ans.lower() + '</s>' for ans in answer]
+                # print(f"answer: {answer}")
                 answer = self.tokenizer(answer, padding='longest', return_tensors='pt', add_special_tokens=False).to(device)
 
                 prefix = [prefix] * experts['rgb'].size(0)
                 prefix = self.tokenizer(prefix, padding='longest', return_tensors="pt").to(device)
-
+                # print(prefix.input_ids.shape)
                 start_ids = prefix.input_ids[:, :-1]  # remove </s> token
                 attention_masks = prefix.attention_mask[:, :-1]
-
+                # print(caption)
+                # print(start_ids.shape)
+                # print(attention_masks.shape)
+                # print(experts_train.shape)
+                # print(answer_targets.shape)
                 start_output = self.text_decoder(start_ids,
                                                  attention_mask=attention_masks,
                                                  encoder_hidden_states=experts_train,
+                                                 # labels=answer_targets,
                                                  return_dict=True)
+                # print(start_output.loss.mean())
+
+                outputs = self.text_decoder.generate(start_ids,
+                                                 attention_mask=attention_masks,
+                                                 encoder_hidden_states=experts_train,
+                                                 return_dict=True)
+                output_list_words = [self.tokenizer.decode(output, skip_special_tokens=True).split(' ')[-1] for output in outputs]
+                binary_output = torch.tensor([1 if i == "hateful" else 0 for i in output_list_words]).to(device)
+                # return binary_output
+                # print([[self.tokenizer.decode(start_output[5])]])
 
                 logits = start_output.logits[:, -1, :]
                 answer_first_token = answer.input_ids[:, 0]
                 prob_first_token = torch.softmax(logits, dim=1).index_select(dim=1, index=answer_first_token)
+                # print(answer_first_token)
                 _, topk_ids = prob_first_token.topk(k_test, dim=1)
 
                 # answer input: [num_caption * k, answer_len]
@@ -97,19 +130,27 @@ class PrismerCaption(Prismer):
 
                 answer_targets = input_ids.masked_fill(input_ids == self.tokenizer.pad_token_id, -100)
                 answer_targets[:, :-answer.input_ids.shape[1]] = -100
-
+                # print(input_ids.shape)
+                # print(answer_targets.shape)
+                # print(answer_targets)
                 output = self.text_decoder(input_ids,
                                            attention_mask=attention_masks,
                                            encoder_hidden_states=experts_train,
                                            labels=answer_targets,
                                            return_dict=True)
+                # print(output.loss.mean())
+                # print(f"outputs: {output}")
+                # print([[self.tokenizer.decode(i) for i in output]])
 
                 log_probs_sum = -output.loss / torch.sum(answer_targets != -100, dim=-1)
                 log_probs_sum = log_probs_sum.view(-1, k_test)
-
+                # print(log_probs_sum)
                 max_topk_ids = log_probs_sum.argmax(dim=1)
+                # print(max_topk_ids)
                 max_ids = topk_ids[max_topk_ids >= 0, max_topk_ids]
-                return max_ids
+                # print(max_ids)
+                # print(binary_output)
+                return output.loss.mean(), max_ids
 
 
 def tile(x, dim, n_tile):

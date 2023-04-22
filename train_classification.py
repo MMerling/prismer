@@ -10,6 +10,9 @@ import random
 import time
 import functools
 import torch
+from torchmetrics.classification import BinaryAUROC, BinaryAccuracy
+import os
+import json
 try:
     import ruamel_yaml as yaml
 except ModuleNotFoundError:
@@ -84,6 +87,8 @@ elif args.full_shard:  # Model Sharding: ZeRO 3
     model = accelerator.prepare(model)
 else:
     accelerator = Accelerator(mixed_precision=args.mixed_precision)
+if not os.path.exists(f'logging/classification_{args.exp_name}/'):
+    os.makedirs(f'logging/classification_{args.exp_name}/')
 
 # Reload saved states
 if not args.from_checkpoint:
@@ -94,6 +99,9 @@ if not args.from_checkpoint:
     start_epoch = 0
 else:
     state_dict = torch.load(f'logging/classification_{args.exp_name}/pytorch_model.bin', map_location='cpu')
+    # state_dict['expert_encoder.positional_embedding'] = interpolate_pos_embed(
+    #     state_dict['expert_encoder.positional_embedding'],
+    #     len(model.expert_encoder.positional_embedding))
     if os.path.exists(f'logging/classification_{args.exp_name}/epoch.pt'):
         start_epoch = torch.load(f'logging/classification_{args.exp_name}/epoch.pt')[0] + 1
     else:
@@ -114,11 +122,15 @@ best = 0
 for epoch in range(start_epoch, config['max_epoch']):
     train_loss = 0
     num_train_elems = 0
+    output_list = []
+    answers = []
     model.train()
+
     for i, (experts, caption) in enumerate(tqdm(train_loader)):
         cosine_lr_schedule(optimizer, epoch * len(train_loader) + i, config['max_epoch'] * len(train_loader), config['init_lr'], config['min_lr'])
-        loss = model(experts, caption, prefix=config['prefix'])
-
+        loss, output_list_binary, answer_targets_binary = model(experts, caption, prefix=config['prefix'])
+        output_list.append(output_list_binary)
+        answers.append(answer_targets_binary)
         optimizer.zero_grad()
         accelerator.backward(loss)
         optimizer.step()
@@ -127,34 +139,76 @@ for epoch in range(start_epoch, config['max_epoch']):
         num_train_elems += 1
         
     train_loss /= num_train_elems
-    accelerator.print(f"Epoch {epoch:03d} | loss: {train_loss:.4f} || Time: {(time.time() - start_time):.4f}")
-    
-    if (epoch + 1) % 5 == 0:
+    flat_output = torch.tensor([val for sublist in output_list for val in sublist])
+    flat_answers = torch.tensor([val for sublist in answers for val in sublist])
+
+    train_ba = BinaryAccuracy()
+    train_bauroc = BinaryAUROC()
+    acc = train_ba(flat_output, flat_answers).item()
+    auroc = train_bauroc(flat_output, flat_answers).item()
+    with open(f'logging/classification_{args.exp_name}/epoch_train.jsonl', 'a') as log:
+        line = {"epoch": epoch, "loss": train_loss, "acc": acc, "auroc": auroc}
+        json.dump(line, log)
+        log.write("\n")
+    accelerator.print(f"Train Epoch {epoch:03d} | loss: {train_loss:.4f} | acc: {acc:.4f} | auroc: {auroc:.4f} || Time: {(time.time() - start_time):.4f}")
+
+    if (epoch + 1) % 1 == 0:
+        start_time = time.time()
         model.eval()
+        num_valid_elems = 0
         num_test_elems = 0
         accurate = 0
+        valid_loss = 0
+        valid_output = torch.tensor(()).to('cuda')
+        valid_answer = torch.tensor(()).to('cuda')
+
         with torch.no_grad():
             answer_list = test_loader.dataset.answer_list
+
             for step, (experts, gt) in enumerate(tqdm(test_loader)):
-                predictions = model(experts, answer=answer_list, train=False, prefix=config['prefix'], k_test=config['k_test'], inference='rank')
+                loss, predictions = model(experts, answer=answer_list, train=False, prefix=config['prefix'], k_test=config['k_test'], inference='rank')
     
                 if accelerator.use_distributed:
                     predictions, gt = accelerator.gather_for_metrics((predictions, gt))
-
-                accurate_preds = predictions == gt
-                num_test_elems += accurate_preds.shape[0]
-                accurate += accurate_preds.long().sum()
-            eval_metric = accurate.item() / num_test_elems
-       
+                # print(answer_list)
+                valid_loss += loss.item()
+                num_valid_elems += 1
+                # preds = [answer_list[i] for i in predictions]
+                # print(predictions)
+                # print(gt)
+                valid_output = torch.cat((valid_output, predictions), 0)
+                valid_answer = torch.cat((valid_answer, gt), 0)
+                # accurate_preds = predictions == gt
+                # num_test_elems += accurate_preds.shape[0]
+                # accurate += accurate_preds.long().sum()
+            valid_ba = BinaryAccuracy().to('cuda')
+            valid_bauroc = BinaryAUROC().to('cuda')
+            valid_acc = valid_ba(valid_output, valid_answer).item()
+            valid_auroc = valid_bauroc(valid_output, valid_answer).item()
+            # print(valid_acc)
+            # print(valid_auroc)
+            # eval_metric = accurate.item() / num_test_elems
+            # valid loss
+            valid_loss /= num_valid_elems
+            # print(valid_loss)
+        with open(f'logging/classification_{args.exp_name}/epoch_valid.jsonl', 'a') as log:
+            line = {"epoch": epoch, "loss": valid_loss, "acc": valid_acc, "auroc": valid_auroc}
+            json.dump(line, log)
+            log.write("\n")
         accelerator.wait_for_everyone()
-        accelerator.print(f'{config["shots"]}-Shot Acc: {eval_metric}')
-    
-        if eval_metric > best:
-            best = eval_metric
+        accelerator.print(
+            f"Valid Epoch {epoch:03d} | loss: {valid_loss:.4f} | acc: {valid_acc:.4f} | auroc: {valid_auroc:.4f} || Time: {(time.time() - start_time):.4f}")
+
+        # accelerator.print(f'{config["shots"]}-Shot Acc: {eval_metric}')
+
+        if valid_acc > best:
+            with open(f"logging/classification_{args.exp_name}/best.txt", "w") as best:
+                best.write(f"best epoch {epoch} with valid_acc: {valid_acc} and valid_ auroc: {valid_auroc}")
+            best = valid_acc
             accelerator.save_state(f'logging/classification_{args.exp_name}')
             accelerator.save([epoch], f'logging/classification_{args.exp_name}/epoch.pt')
 
-
+model.eval()
 
 
 

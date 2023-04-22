@@ -54,7 +54,7 @@ test_loader = create_loader(test_dataset, batch_size=1, num_workers=4, train=Fal
 
 # load pre-trained model
 model = PrismerCaption(config)
-state_dict = torch.load(f'logging/caption_{args.exp_name}/pytorch_model.bin', map_location='cuda:0')
+state_dict = torch.load(f'logging/{args.exp_name}/pytorch_model.bin', map_location='cuda:0')
 model.load_state_dict(state_dict)
 tokenizer = model.tokenizer
 

@@ -7,10 +7,12 @@
 import glob
 from torch.utils.data import Dataset
 from dataset.utils import *
+import pandas as pd
+import numpy as np
 
 
 class Classification(Dataset):
-    def __init__(self, config, train):
+    def __init__(self, config, train, test=False):
         self.data_path = config['data_path']
         self.label_path = config['label_path']
         self.experts = config['experts']
@@ -19,19 +21,31 @@ class Classification(Dataset):
         self.prefix = config['prefix']
 
         self.train = train
+        self.test = test
         self.transform = Transform(resize_resolution=config['image_resolution'], scale_size=[0.5, 1.0], train=True)
 
         if train:
-            data_folders = glob.glob(f'{self.data_path}/imagenet_train/*/')
-            self.data_list = [{'image': data} for f in data_folders for data in glob.glob(f + '*.JPEG')[:self.shots]]
-            self.answer_list = json.load(open(f'{self.data_path}/imagenet/' + 'imagenet_answer.json'))
-            self.class_list = json.load(open(f'{self.data_path}/imagenet/' + 'imagenet_class.json'))
+            data_folders = glob.glob(f'{self.data_path}/img/')
+            self.json_list = pd.read_json(open(f'{self.data_path}/' + 'train.jsonl'), lines=True)
+            self.answer_list = ["normal", "hateful"]
+            # self.data_list = [{'image': data} for f in data_folders for data in glob.glob(f + '*.png')[:self.shots]]
+            self.data_list = [{'image': data} for data in self.json_list["img"].values]
+        elif test:
+            self.json_list = pd.read_json(open(f'{self.data_path}/' + 'test_combined.jsonl'), lines=True)
+            self.answer_list = ["normal", "hateful"]
+            # self.data_list = [{'image': data} for f in data_folders for data in glob.glob(f + '*.png')[:self.shots]]
+            self.data_list = [{'image': data} for data in self.json_list["img"].values]
         else:
-            data_folders = glob.glob(f'{self.data_path}/imagenet/*/')
-            self.data_list = [{'image': data} for f in data_folders for data in glob.glob(f + '*.JPEG')]
-            self.answer_list = json.load(open(f'{self.data_path}/imagenet/' + 'imagenet_answer.json'))
-            self.class_list = json.load(open(f'{self.data_path}/imagenet/' + 'imagenet_class.json'))
+            data_folders = glob.glob(f'{self.data_path}/img/')
+            # self.data_list = [{'image': data} for f in data_folders for data in glob.glob(f + '*.png')]
+            self.json_list = pd.read_json(open(f'{self.data_path}/' + 'dev_combined.jsonl'), lines=True)
 
+            self.answer_list = ["normal", "hateful"]
+            self.data_list = [{'image': data} for data in self.json_list["img"].values]
+        self.json_list["hateful"] = np.where(self.json_list["label"] == 0, "normal", "hateful")
+        # self.answer_list["hateful"] = np.where(self.answer_list["label"] == 0, "normal", "hateful")
+        # print(self.data_list)
+        # print(self.answer_list)
     def __len__(self):
         return len(self.data_list)
 
@@ -41,21 +55,28 @@ class Classification(Dataset):
             img_path_split = img_path.split('/')
             img_name = img_path_split[-2] + '/' + img_path_split[-1]
             class_name = img_path_split[-2]
-            image, labels, labels_info = get_expert_labels(self.data_path, self.label_path, img_name, 'imagenet_train', self.experts)
+            image, labels, labels_info = get_expert_labels(self.data_path, self.label_path, img_name, self.dataset, self.experts, True)
+        elif self.test:
+            img_path_split = img_path.split('/')
+            img_name = img_path_split[-2] + '/' + img_path_split[-1]
+            class_name = img_path_split[-2]
+            image, labels, labels_info = get_expert_labels(self.data_path, self.label_path, img_name, self.dataset,
+                                                           self.experts, True)
         else:
             img_path_split = img_path.split('/')
             img_name = img_path_split[-2] + '/' + img_path_split[-1]
             class_name = img_path_split[-2]
-            image, labels, labels_info = get_expert_labels(self.data_path, self.label_path, img_name, 'imagenet', self.experts)
+            image, labels, labels_info = get_expert_labels(self.data_path, self.label_path, img_name, self.dataset, self.experts, True)
 
         experts = self.transform(image, labels)
         experts = post_label_process(experts, labels_info)
 
         if self.train:
-            caption = self.prefix + ' ' + self.answer_list[int(self.class_list[class_name])].lower()
+            caption = self.prefix + ' ' + self.json_list[self.json_list["img"]==img_name]["hateful"].to_list()[0]
             return experts, caption
         else:
-            return experts, self.class_list[class_name]
+            # caption = self.prefix + ' ' + self.json_list[self.json_list["img"] == img_name]["hateful"].to_list()[0]
+            return experts, self.json_list[self.json_list["img"] == img_name]["label"].to_list()[0]
 
 
 

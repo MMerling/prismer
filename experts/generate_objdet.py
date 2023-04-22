@@ -27,7 +27,7 @@ data_path = config['data_path']
 save_path = config['save_path']
 
 depth_path = os.path.join(save_path, 'depth', data_path.split('/')[-1])
-batch_size = 32
+batch_size = 24
 dataset = Dataset(data_path, depth_path, transform)
 data_loader = torch.utils.data.DataLoader(
     dataset=dataset,

@@ -22,6 +22,7 @@ class Dataset(Dataset):
         data_folders = glob.glob(f'{data_path}/*/')
         self.data_list = [data for f in data_folders for data in glob.glob(f + '*.JPEG')]
         self.data_list += [data for f in data_folders for data in glob.glob(f + '*.jpg')]
+        self.data_list += [data for f in data_folders for data in glob.glob(f + '*.png')]
 
     def __len__(self):
         return len(self.data_list)

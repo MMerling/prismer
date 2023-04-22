@@ -39,9 +39,9 @@ config = {
     'use_cpu': False,
 }
 
-os.makedirs('/root/.cache/huggingface/accelerate', exist_ok=True)
+os.makedirs('/home/mad/.cache/huggingface/accelerate', exist_ok=True)
 
-with open('/root/.cache/huggingface/accelerate/default_config.yaml', 'w') as file:
+with open('/home/mad/.cache/huggingface/accelerate/default_config.yaml', 'w') as file:
     yaml.dump(config, file)
 
 
