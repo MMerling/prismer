@@ -1,0 +1,1 @@
+best epoch 0 with valid_acc: 0.620312511920929 and valid_ auroc: 0.521803617477417

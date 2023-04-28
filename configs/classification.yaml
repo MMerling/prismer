@@ -3,18 +3,19 @@
 data_path: './hm_data'
 label_path: './hm_data/labels'
 
-experts: ['depth', 'normal', 'seg_coco', 'edge', 'obj_detection', 'ocr_detection']   # 'none' for PrismerZ
+#experts: ['depth', 'normal', 'seg_coco', 'edge', 'obj_detection', 'ocr_detection']   # 'none' for PrismerZ
+experts: []
 
 freeze: 'freeze_vision'
 dataset: 'hm_data'
-shots: 1
+shots: 2
 
 image_resolution: 384
 prismer_model: 'prismer_base'  # 'prismer-large' for Prismer(Z)-Large
 
 batch_size_train: 2  # for 4 * 8 nodes [effective batch-size: 64]
 batch_size_test: 4
-init_lr: 5e-5
+init_lr: 5e-11
 weight_decay: 0.05
 min_lr: 0
 max_epoch: 15

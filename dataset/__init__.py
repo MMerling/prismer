@@ -32,9 +32,9 @@ def create_dataset(dataset, config):
         test_dataset = Classification(config, train=False)
         return train_dataset, test_dataset
 
-    elif dataset == 'demo':
-        test_dataset = Classification(config, train=False, test=True)
-        return test_dataset
+    # elif dataset == 'demo':
+    #     test_dataset = Classification(config, train=False, test=True)
+    #     return test_dataset
 
 def create_loader(dataset, batch_size, num_workers, train, collate_fn=None):
     data_loader = DataLoader(dataset,

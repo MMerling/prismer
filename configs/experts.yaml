@@ -1,2 +1,2 @@
-data_path: 'hm_data'
-save_path: 'hm_data/labels'
+data_path: 'helpers'
+save_path: 'helpers/labels'

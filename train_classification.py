@@ -125,10 +125,10 @@ for epoch in range(start_epoch, config['max_epoch']):
     output_list = []
     answers = []
     model.train()
-
+    answer_list = train_loader.dataset.answer_list
     for i, (experts, caption) in enumerate(tqdm(train_loader)):
         cosine_lr_schedule(optimizer, epoch * len(train_loader) + i, config['max_epoch'] * len(train_loader), config['init_lr'], config['min_lr'])
-        loss, output_list_binary, answer_targets_binary = model(experts, caption, prefix=config['prefix'])
+        loss, output_list_binary, answer_targets_binary = model(experts, caption, answer=answer_list, prefix=config['prefix'])
         output_list.append(output_list_binary)
         answers.append(answer_targets_binary)
         optimizer.zero_grad()
@@ -137,7 +137,8 @@ for epoch in range(start_epoch, config['max_epoch']):
 
         train_loss += loss.item()
         num_train_elems += 1
-        
+        # print(f"output_list: {output_list}")
+        # print(f"answers: {answers}")
     train_loss /= num_train_elems
     flat_output = torch.tensor([val for sublist in output_list for val in sublist])
     flat_answers = torch.tensor([val for sublist in answers for val in sublist])
@@ -161,12 +162,12 @@ for epoch in range(start_epoch, config['max_epoch']):
         valid_loss = 0
         valid_output = torch.tensor(()).to('cuda')
         valid_answer = torch.tensor(()).to('cuda')
-
+        valid_prob = torch.tensor(()).to('cuda')
         with torch.no_grad():
             answer_list = test_loader.dataset.answer_list
 
             for step, (experts, gt) in enumerate(tqdm(test_loader)):
-                loss, predictions = model(experts, answer=answer_list, train=False, prefix=config['prefix'], k_test=config['k_test'], inference='rank')
+                loss, predictions, pred_prob = model(experts, answer=answer_list, train=False, prefix=config['prefix'], k_test=config['k_test'], inference='rank')
     
                 if accelerator.use_distributed:
                     predictions, gt = accelerator.gather_for_metrics((predictions, gt))
@@ -174,17 +175,19 @@ for epoch in range(start_epoch, config['max_epoch']):
                 valid_loss += loss.item()
                 num_valid_elems += 1
                 # preds = [answer_list[i] for i in predictions]
-                # print(predictions)
+                # print(pred_prob)
                 # print(gt)
                 valid_output = torch.cat((valid_output, predictions), 0)
                 valid_answer = torch.cat((valid_answer, gt), 0)
+                valid_prob = torch.cat((valid_prob, pred_prob), 0)
                 # accurate_preds = predictions == gt
                 # num_test_elems += accurate_preds.shape[0]
                 # accurate += accurate_preds.long().sum()
+            # print(valid_prob)
             valid_ba = BinaryAccuracy().to('cuda')
             valid_bauroc = BinaryAUROC().to('cuda')
             valid_acc = valid_ba(valid_output, valid_answer).item()
-            valid_auroc = valid_bauroc(valid_output, valid_answer).item()
+            valid_auroc = valid_bauroc(valid_prob, valid_answer).item()
             # print(valid_acc)
             # print(valid_auroc)
             # eval_metric = accurate.item() / num_test_elems
@@ -201,10 +204,10 @@ for epoch in range(start_epoch, config['max_epoch']):
 
         # accelerator.print(f'{config["shots"]}-Shot Acc: {eval_metric}')
 
-        if valid_acc > best:
+        if valid_auroc > best:
             with open(f"logging/classification_{args.exp_name}/best.txt", "w") as best:
                 best.write(f"best epoch {epoch} with valid_acc: {valid_acc} and valid_ auroc: {valid_auroc}")
-            best = valid_acc
+            best = valid_auroc
             accelerator.save_state(f'logging/classification_{args.exp_name}')
             accelerator.save([epoch], f'logging/classification_{args.exp_name}/epoch.pt')
 

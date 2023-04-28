@@ -1,0 +1,1 @@
+best epoch 7 with valid_acc: 0.6171875 and valid_ auroc: 0.5961512923240662
