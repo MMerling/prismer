@@ -15,4 +15,5 @@ It contains the Prismer code with updates made to support finetuning for classif
 4. Run `accelerate launch experts/generate_{EXPERT_NAME}.py` for each expert to generate the transformed images for Prismer.
 5. Fine-tuning can be run with `accelerate launch train_classification.py  --exp_name {pre-trained model}`
     - If using PrismerZ update configs/classification.yaml to not use any of the experts. Otherwise populate all experts.
-6. Validation can be run with `accelerate launch demo_caption.py --exp_name {trained model} --from_checkpoint`
+    - Outputs of training are saved under `logging`. Some sample runs are saved there, but this is not exhaustive of all runs ran.
+6. Validation can be run with `accelerate launch demo_caption.py --exp_name {trained model} --from_checkpoint`.
